@@ -22,6 +22,6 @@ RUN apk add --no-cache --virtual .build-deps gcc musl-dev git rust cargo libffi-
 
 RUN apk add --no-cache -X http://dl-cdn.alpinelinux.org/alpine/edge/testing words-gb
 
-COPY etcd-backer-upper.py .
+COPY artifact-backer-upper.py .
 
-ENTRYPOINT [ "python", "./etcd-backer-upper.py" ]
+ENTRYPOINT [ "python", "./artifact-backer-upper.py" ]

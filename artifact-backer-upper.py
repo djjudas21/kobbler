@@ -11,7 +11,7 @@ import pyAesCrypt
 logger = None
 
 '''
-    NAME: etcd-backer-upper
+    NAME: artifact-backer-upper
     AUTHOR: Terry Hurcombe <terry.hurcombe@fasthosts.com>
     DESCRIPTION:
 
@@ -21,9 +21,9 @@ logger = None
 
     Backup archive lifecycle is managed by S3 BucketLifecycle policy. 
 
-    Upon a successful backup and upload, node-exporter is updated to reflect the current epoch. This data is available under the metric last_etcd_backup
+    Upon a successful backup and upload, node-exporter is updated to reflect the current epoch. This data is available under the metric last_artifact_backup
 
-    The script utilises a rotating logfile handler, logs can be found at /var/log/etcd-backer-upper.log, to increase the loglevel, specify --loglevel
+    The script utilises a rotating logfile handler, logs can be found at /var/log/artifact-backer-upper.log, to increase the loglevel, specify --loglevel
     parameter (see --help for more detail), be aware that DEBUG is very verbose as it debugs boto3 calls to S3
 
     Typically the script can be run without passing any command line arguments as sane defaults are set, see --help for more information.
@@ -48,7 +48,7 @@ SSL_VERIFY = True
   The location of our log files
 
 '''
-LOG_FILE='/var/log/etcd-backer-upper.log'
+LOG_FILE='/var/log/artifact-backer-upper.log'
 
 
 '''
@@ -102,7 +102,7 @@ class BackupETCD(S3Backup):
 
 
     def etcd_openshift_4(self):
-        path = args.work_dir + '/etcd-backup'
+        path = args.work_dir + '/artifact-backup'
         host_path = "/host{}".format(path)
 
         logging.info("Backup etcd type Openshift4, path={} host_path={}".format(path, host_path))
@@ -203,18 +203,18 @@ def update_node_exporter(work_dir, collector_dir):
     logger.info("Writing backup status for node-exporter")
     currentEpoch = int((datetime.now() - datetime(1970,1,1)).total_seconds())
     promData = [
-        "# HELP last_etcd_backup epoch of the last successful etcd backup",
-        "# TYPE last_etcd_backup counter",
-        "last_etcd_backup{{ host=\"{}\" }} {}\n".format(socket.gethostname(), currentEpoch),
+        "# HELP last_artifact_backup epoch of the last successful etcd backup",
+        "# TYPE last_artifact_backup counter",
+        "last_artifact_backup{{ host=\"{}\" }} {}\n".format(socket.gethostname(), currentEpoch),
     ]
   
     # write prom file atomically
-    promfile = open("{}/etcd-backup.prom".format(work_dir), 'w')
+    promfile = open("{}/artifact-backup.prom".format(work_dir), 'w')
     promfile.write("{}\n".format("\n".join(promData)))
     promfile.close()
     shutil.move(
-        "{}/etcd-backup.prom".format(work_dir), 
-        "{}/etcd-backup.prom".format(collector_dir)
+        "{}/artifact-backup.prom".format(work_dir), 
+        "{}/artifact-backup.prom".format(collector_dir)
     )
 
 

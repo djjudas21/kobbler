@@ -1,7 +1,7 @@
 apiVersion: batch/v1beta1
 kind: CronJob
 metadata:
-  name: etcd-backup
+  name: artifact-backup
   labels:
     app: etcd
     component: backup
@@ -15,18 +15,18 @@ spec:
       backoffLimit: 0
       template:
         spec:
-          serviceAccountName: etcd-backup
+          serviceAccountName: artifact-backup
           restartPolicy: Never
           dnsPolicy: ClusterFirstWithHostNet
           hostNetwork: true
           hostPID: true
           containers:
-            - name: etcd-backup
-              image: reg.1u1.it/okdaas/etcd-backup:0.0.35
+            - name: artifact-backup
+              image: reg.1u1.it/okdaas/artifact-backup:0.0.35
               imagePullPolicy: Always
               env:
                 - name: BUCKET
-                  value: okd-backups
+                  value: artifact-backups
                 - name: S3ENDPOINT
                   value: https://s3-de-central.profitbricks.com
                 - name: AWS_ACCESS_KEY_ID
@@ -45,8 +45,8 @@ spec:
                   value: http://itproxy.1and1.org:3128
               command:
                 - python
-                - ./etcd-backer-upper.py
-                - --bucket=etcd-backups
+                - ./artifact-backer-upper.py
+                - --bucket=artifact-backups
                 - --s3-endpoint=https://s3-de-central.profitbricks.com
                 - --encrypt=True
                 - --etcd-cert=/etc/kubernetes/serving-cert/tls.crt

@@ -1,0 +1,91 @@
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: etcd-backup
+  labels:
+    app: etcd
+    component: backup
+spec:
+  schedule: "40 */4 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 5
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          serviceAccountName: etcd-backup
+          restartPolicy: Never
+          dnsPolicy: ClusterFirstWithHostNet
+          hostNetwork: true
+          hostPID: true
+          containers:
+            - name: etcd-backup
+              image: reg.1u1.it/okdaas/etcd-backup:0.0.35
+              imagePullPolicy: Always
+              env:
+                - name: BUCKET
+                  value: okd-backups
+                - name: S3ENDPOINT
+                  value: https://s3-de-central.profitbricks.com
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: s3credentials
+                      key: aws_access_key_id
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: s3credentials
+                      key: aws_secret_access_key
+                - name: HTTP_PROXY
+                  value: http://itproxy.1and1.org:3128
+                - name: HTTPS_PROXY
+                  value: http://itproxy.1and1.org:3128
+              command:
+                - python
+                - ./etcd-backer-upper.py
+                - --bucket=etcd-backups
+                - --s3-endpoint=https://s3-de-central.profitbricks.com
+                - --encrypt=True
+                - --etcd-cert=/etc/kubernetes/serving-cert/tls.crt
+                - --etcd-key=/etc/kubernetes/serving-cert/tls.key
+                - --etcd-ca=/etc/kubernetes/serving-ca/ca-bundle.crt
+                - --hostname=etcd.openshift-etcd
+                - --collector-dir=/var/node_exporter/textfile
+                - --etcd-type=Openshift4
+                - --publickey=/etc/ssh/id_rsa.pub
+              securityContext:
+                runAsUser: 0
+                privileged: true
+              volumeMounts:
+                - name: host
+                  mountPath: /host
+                - name: sshrsapubkey
+                  mountPath: "/etc/ssh/"
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests:
+                  memory: "128Mi"
+                  cpu: "500m"
+                limits:
+                  memory: "512Mi"
+                  cpu: "4000m"
+          volumes:
+            - name: host
+              hostPath:
+                path: /
+                type: Directory
+            - name: sshrsapubkey
+              secret:
+                secretName: cluster-ssh-key-pub
+            - name: tmp
+              emptydir: {}
+          nodeSelector:
+            node-role.kubernetes.io/master: ""
+          tolerations:
+            - effect: NoSchedule
+              key: node-role.kubernetes.io/master

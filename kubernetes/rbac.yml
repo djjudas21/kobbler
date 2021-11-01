@@ -8,27 +8,29 @@ metadata:
     component: backup
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRole
 metadata:
-  name: use-privileged-scc
+  name: secret-reader
 rules:
-  - apiGroups:
-      - security.openshift.io
-    resources:
-      - securitycontextconstraints
-    verbs:
-      - use
-    resourceNames:
-      - privileged
+#- apiGroups: ["rbac.authorization.k8s.io"]
+- apiGroups: [""]
+  resources:
+    - secrets
+  verbs:
+    - get
+    - watch
+    - list
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
+kind: ClusterRoleBinding
 metadata:
-  name: artifact-backup-sa-privileged
+  name: artifact-backup-secret-reader
 roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: use-privileged-scc
+  #apiGroup: rbac.authorization.k8s.io
+  apiGroup: ""
+  kind: ClusterRole
+  name: secret-reader
 subjects:
   - kind: ServiceAccount
     name: artifact-backup
+    namespace: artifact-backup

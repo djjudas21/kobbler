@@ -18,8 +18,6 @@ spec:
           serviceAccountName: artifact-backup
           restartPolicy: Never
           dnsPolicy: ClusterFirstWithHostNet
-          hostNetwork: true
-          hostPID: true
           containers:
             - name: artifact-backup
               image: reg.1u1.it/okdaas/artifact-backup:0.0.1
@@ -49,15 +47,9 @@ spec:
                 - --bucket=artifact-backups
                 - --s3-endpoint=https://s3-de-central.profitbricks.com
                 - --encrypt=True
-                - --hostname=etcd.openshift-etcd
                 - --collector-dir=/var/node_exporter/textfile
                 - --publickey=/etc/ssh/id_rsa.pub
-              securityContext:
-                runAsUser: 0
-                privileged: true
               volumeMounts:
-                - name: host
-                  mountPath: /host
                 - name: sshrsapubkey
                   mountPath: "/etc/ssh/"
                   readOnly: true
@@ -71,10 +63,6 @@ spec:
                   memory: "512Mi"
                   cpu: "4000m"
           volumes:
-            - name: host
-              hostPath:
-                path: /
-                type: Directory
             - name: sshrsapubkey
               secret:
                 secretName: cluster-ssh-key-pub

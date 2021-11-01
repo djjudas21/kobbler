@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import os, sys, logging, argparse, tarfile, socket, subprocess, shutil, traceback
+import os, sys, logging, argparse, tarfile, socket, shutil, traceback, copy
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from S3Utils import S3Backup
@@ -7,6 +7,9 @@ from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP
 import secrets
 import pyAesCrypt
+import yaml
+from kubernetes import client, config
+from kubernetes.client import configuration
 
 logger = None
 
@@ -67,9 +70,55 @@ MAX_LOGSIZE_BYTES=512000
 '''
 MAX_LOG_FILES=5
 
+def drop_nones_inplace(d: dict) -> dict:
+    """Recursively drop Nones in dict d in-place and return original dict"""
+    dd = drop_nones(d)
+    d.clear()
+    d.update(dd)
+    return d
+
+def drop_nones(d: dict) -> dict:
+    """Recursively drop Nones in dict d and return a new dict"""
+    dd = {}
+    for k, v in d.items():
+        if isinstance(v, dict):
+            dd[k] = drop_nones(v)
+        elif isinstance(v, (list, set, tuple)):
+            # note: Nones in lists are not dropped
+            # simply add "if vv is not None" at the end if required
+            dd[k] = type(v)(drop_nones(vv) if isinstance(vv, dict) else vv 
+                            for vv in v) 
+        elif v is not None:
+            dd[k] = v
+    return dd
+
+def kube_metadata_filter(resource):
+    '''
+        Deletes metadata from a kube resource allowing for the returned
+        resource to be applied to another cluster without conflict
+    '''
+
+    filtered = copy.deepcopy(resource)
+    metadata_remove = [ 'uid', 'owner_references', 'managed_fields', 'resource_version']
+    annotations_remove = [ 'kopf.zalando.org/last-handled-configuration']
+
+    for md in metadata_remove:   
+        try:
+            del filtered['metadata'][md]
+        except KeyError:
+            pass
+    for annotation in annotations_remove:
+        try:
+            del filtered['metadata']['annotations'][annotation]
+        except:
+            pass
+
+    # Drop any keys that have None values
+    return drop_nones_inplace(filtered)
+
+
 # create a class that bases off S3Utils.S3Backup,
-class BackupETCD(S3Backup):
-    ETCDCTL_PORT=2379
+class BackupArtifacts(S3Backup):
 
     # instantiator, this must take at least the same args as S3Backup
     def __init__(self, **kwargs):
@@ -77,48 +126,43 @@ class BackupETCD(S3Backup):
         S3Backup.__init__(self, **kwargs)
 
 
-    def create_etcd_snapshot(self, cacert, cert, key, etcd_api=3, hostname=socket.gethostname()):
-        if not hostname:
-            raise ValueError("Unable to determine this hosts name")
+    def backup_artifacts(self):
+        # Load kube context from within cluster
+        config.load_incluster_config()
+        v1 = client.CoreV1Api()
+
+        # Trash any existing files in backup dir
+        dir = os.path.join(args.work_dir, 'artifact-backup')
+        if os.path.exists(dir):
+            shutil.rmtree(dir)
+
+        if not os.path.exists(dir):
+            os.mkdir(dir)
+
+        logging.info("Backup artifacts, path={}".format(dir))
+
+        # Get secrets in all namespaces
+        secrets = v1.list_secret_for_all_namespaces(watch=False)
+        for item in secrets.items:
+            print("%s\t%s" % (item.metadata.namespace, item.metadata.name))
+            
+            nsdir = os.path.join(dir, item.metadata.namespace)
+            if not os.path.exists(nsdir):
+                os.mkdir(nsdir)
+
+            # Export the secret as a dict
+            dict = item.to_dict()
         
-        filename = '/tmp/snapshot-{}.db'.format(datetime.now().strftime("%d-%m-%Y-%H.%M.%S"))
-        
-        self.logger.info("create etcd snapshot {}".format(filename))
-        env = os.environ.copy()
-        env["ETCDCTL_API"] = str(etcd_api)
+            # Filter out unwanted attributes
+            newdict = kube_metadata_filter(dict)
 
-        # this would be better done via python-etcd3 but will suffice for now
-        out = subprocess.check_output(
-            [
-                '/usr/bin/etcdctl', 'snapshot', 'save', filename, 
-                '--cacert={}'.format(cacert), '--cert={}'.format(cert), '--key={}'.format(key),
-                '--endpoints=https://{}:{}'.format(hostname, BackupETCD.ETCDCTL_PORT)
-            ],
-            env=env
-        )
-        self.logger.debug(out)
-        self.logger.debug("etcd snapshot created at {} ({} bytes)".format(filename, os.path.getsize(filename)))
-        return filename
+            # Write yaml version of this dict
+            filename = os.path.join(nsdir, item.metadata.name + '.yaml')
+            f = open(filename, "w")
+            f.write(yaml.dump(newdict))
+            f.close()
 
-
-    def etcd_openshift_4(self):
-        path = args.work_dir + '/artifact-backup'
-        host_path = "/host{}".format(path)
-
-        logging.info("Backup etcd type Openshift4, path={} host_path={}".format(path, host_path))
-
-        shutil.rmtree(host_path, ignore_errors=True) 
-        os.mkdir(host_path)
-
-        env = os.environ.copy()
-
-        out = subprocess.check_output(
-            ['/usr/sbin/chroot', '/host', '/usr/local/bin/cluster-backup.sh', path],
-            env=env
-        )
-        #shutil.move(host_path, path)
-        logging.debug(out)
-        return host_path
+        return dir
 
 
     def tar_backup_content(self, filename, sources):
@@ -203,7 +247,7 @@ def update_node_exporter(work_dir, collector_dir):
     logger.info("Writing backup status for node-exporter")
     currentEpoch = int((datetime.now() - datetime(1970,1,1)).total_seconds())
     promData = [
-        "# HELP last_artifact_backup epoch of the last successful etcd backup",
+        "# HELP last_artifact_backup epoch of the last successful artifact backup",
         "# TYPE last_artifact_backup counter",
         "last_artifact_backup{{ host=\"{}\" }} {}\n".format(socket.gethostname(), currentEpoch),
     ]
@@ -237,7 +281,7 @@ def main():
  
     os.chdir(args.work_dir)
 
-    backup = BackupETCD(
+    backup = BackupArtifacts(
         s3_endpoint=args.s3_endpoint, s3_bucket=args.bucket, bucket_lifecycle_days=args.expire_days, ssl_verify=SSL_VERIFY
     )
     backup.ensure_bucket_created()
@@ -277,21 +321,10 @@ def main():
     # Files to be uploaded to S3
     content = []
     try:
-        if args.etcd_type == 'Standalone':
-            snapshot = backup.create_etcd_snapshot(cacert, cacert=args.etcd_ca, cert=args.etcd_cert, key=args.etcd_key, hostname=hostname)
-            content += ['/etc/etcd', snapshot, ]
-            # we'll want to bin this once backup completes
-            intermediate_files.append(snapshot)
-        elif args.etcd_type == 'Openshift4':
-            content.append(backup.etcd_openshift_4())
-
-            # okd4 backups go into a directory which will need removing 
-            intermediate_files += content
-        else:
-            # realistically should never get here
-            logging.error("Invalid etcd-type version: {}".format(args.etcd_type))
-            return
-
+        snapshot = backup.backup_artifacts()
+        content += [ snapshot, ]
+        # we'll want to bin this once backup completes
+        intermediate_files.append(snapshot)
 
         if args.encrypt:
             # New list of files to encrypt
@@ -317,7 +350,6 @@ def main():
                         target = os.path.join(c, f)
                         encrypt_content.append(target)
                         logger.info("Added {} to list of files to encrypt".format(target))
-
             
             # List of files that have been encrypted
             encrypted_content = []
@@ -380,11 +412,7 @@ if __name__ == "__main__":
     parser.add_argument("--collector-dir", required=False, default="/opt/node_exporter", help="Node export collector directory (Default=/opt/node_exporter)")
     parser.add_argument("--encrypt", required=False, help="Encrypt the backup file (Default=False)")
     parser.add_argument("--publickey", required=False, default="/etc/ssh/ssh_host_rsa_key.pub", help="RSA public key to use for encrypting the backup")
-    parser.add_argument("--etcd-cert", required=False, default='/etc/etcd/peer.crt')
-    parser.add_argument("--etcd-key", required=False, default='/etc/etcd/peer.key')
-    parser.add_argument("--etcd-ca", required=False, default='/etc/etcd/ca.crt')
     parser.add_argument("--hostname", required=False, default=socket.gethostname())
-    parser.add_argument("--etcd-type", required=False, default='Standalone', choices=["Standalone", "Openshift4"], help="Type of ETCD backup, either standalone or Openshift hosted")
 
     args = parser.parse_args()
 

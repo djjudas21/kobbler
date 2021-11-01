@@ -4,7 +4,7 @@ kind: ServiceAccount
 metadata:
   name: artifact-backup
   labels:
-    app: etcd
+    app: artifact
     component: backup
 ---
 apiVersion: rbac.authorization.k8s.io/v1

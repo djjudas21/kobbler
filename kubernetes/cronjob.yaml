@@ -3,7 +3,7 @@ kind: CronJob
 metadata:
   name: artifact-backup
   labels:
-    app: etcd
+    app: artifact
     component: backup
 spec:
   schedule: "40 */4 * * *"
@@ -49,12 +49,8 @@ spec:
                 - --bucket=artifact-backups
                 - --s3-endpoint=https://s3-de-central.profitbricks.com
                 - --encrypt=True
-                - --etcd-cert=/etc/kubernetes/serving-cert/tls.crt
-                - --etcd-key=/etc/kubernetes/serving-cert/tls.key
-                - --etcd-ca=/etc/kubernetes/serving-ca/ca-bundle.crt
                 - --hostname=etcd.openshift-etcd
                 - --collector-dir=/var/node_exporter/textfile
-                - --etcd-type=Openshift4
                 - --publickey=/etc/ssh/id_rsa.pub
               securityContext:
                 runAsUser: 0

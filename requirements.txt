@@ -1,4 +1,6 @@
 boto3>=1.15.0
 pycryptodome>=3.10.0
 pyAesCrypt>=6.0.0
+kubernetes>=19, <20
+pyyaml
 git+https://git.public.glo.gb/cloudengineering/S3Utils.git@0.0.3#egg=S3Utils

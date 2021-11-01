@@ -9,7 +9,7 @@ import shutil
 import traceback
 import copy
 from datetime import datetime
-from logging.handlers import RotatingFileHandler
+from logging import StreamHandler
 from S3Utils import S3Backup
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP
@@ -33,7 +33,7 @@ LOGGER = None
 
     Upon a successful backup and upload, node-exporter is updated to reflect the current epoch. This data is available under the metric last_artifact_backup
 
-    The script utilises a rotating logfile handler, logs can be found at /var/log/artifact-backer-upper.log, to increase the loglevel, specify --loglevel
+    The script utilises a stderr log handler. To increase the loglevel, specify --loglevel
     parameter (see --help for more detail), be aware that DEBUG is very verbose as it debugs boto3 calls to S3
 
     Typically the script can be run without passing any command line arguments as sane defaults are set, see --help for more information.
@@ -51,31 +51,6 @@ LOGGER = None
   Boolean denoting whether or not we verify SSL at the S3 server.
 '''
 SSL_VERIFY = True
-
-'''
-  CONFIG PARAM: LOG_FILE
-
-  The location of our log files
-
-'''
-LOG_FILE = '/var/log/artifact-backer-upper.log'
-
-
-'''
-  CONFIG PARAM: MAX_LOGSIZE_BYTES
-
-  The number of bytes a logfile can grow before it is rotated
-'''
-MAX_LOGSIZE_BYTES = 512000
-
-
-'''
-  CONFIG PARAM: MAX_LOG_FILES
-
-  The number of logfiles to keep on disk
-
-'''
-MAX_LOG_FILES = 5
 
 
 def drop_nones_inplace(d: dict) -> dict:
@@ -447,8 +422,7 @@ if __name__ == "__main__":
     # setup a rotating logfile handler
     logging.basicConfig(level=args.loglevel)
     logger = logging.getLogger(__name__)
-    handler = RotatingFileHandler(
-        LOG_FILE, maxBytes=MAX_LOGSIZE_BYTES, backupCount=MAX_LOG_FILES)
+    handler = StreamHandler()
     handler.setFormatter(logging.Formatter(
         "%(asctime)s:%(levelname)s -> %(message)s", datefmt="%d-%m-%Y %H:%M:%S"))
     logger.addHandler(handler)

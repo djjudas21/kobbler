@@ -22,7 +22,7 @@ spec:
           hostPID: true
           containers:
             - name: artifact-backup
-              image: reg.1u1.it/okdaas/artifact-backup:0.0.35
+              image: reg.1u1.it/okdaas/artifact-backup:0.0.1
               imagePullPolicy: Always
               env:
                 - name: BUCKET

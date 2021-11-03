@@ -53,8 +53,6 @@ spec:
                 - name: sshrsapubkey
                   mountPath: "/etc/ssh/"
                   readOnly: true
-                - name: tmp
-                  mountPath: /tmp
               resources:
                 requests:
                   memory: "128Mi"
@@ -66,8 +64,6 @@ spec:
             - name: sshrsapubkey
               secret:
                 secretName: cluster-ssh-key-pub
-            - name: tmp
-              emptydir: {}
           nodeSelector:
             node-role.kubernetes.io/master: ""
           tolerations:

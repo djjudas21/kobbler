@@ -102,6 +102,16 @@ def kube_metadata_filter(resource):
     # Drop any keys that have None values
     return drop_nones_inplace(filtered)
 
+def empty_contents(folder):
+    for filename in os.listdir(folder):
+        file_path = os.path.join(folder, filename)
+        try:
+            if os.path.isfile(file_path) or os.path.islink(file_path):
+                os.unlink(file_path)
+            elif os.path.isdir(file_path):
+                shutil.rmtree(file_path)
+        except Exception as e:
+            print('Failed to delete %s. Reason: %s' % (file_path, e))
 
 # create a class that bases off S3Utils.S3Backup,
 class BackupArtifacts(S3Backup):
@@ -117,20 +127,14 @@ class BackupArtifacts(S3Backup):
         v1 = client.CoreV1Api()
 
         # Trash any existing files in backup dir
-        dir = os.path.join(args.work_dir, 'artifact-backup')
-        if os.path.exists(dir):
-            shutil.rmtree(dir)
-
-        if not os.path.exists(dir):
-            os.mkdir(dir)
+        dir  = args.work_dir
 
         logging.info("Backup artifacts, path={}".format(dir))
 
         # Get secrets in all namespaces
         secrets = v1.list_secret_for_all_namespaces(watch=False)
+        objects = []
         for item in secrets.items:
-            print("%s\t%s" % (item.metadata.namespace, item.metadata.name))
-
             nsdir = os.path.join(dir, item.metadata.namespace)
             if not os.path.exists(nsdir):
                 os.mkdir(nsdir)
@@ -146,8 +150,9 @@ class BackupArtifacts(S3Backup):
             f = open(filename, "w")
             f.write(yaml.dump(newdict))
             f.close()
+            objects.append(filename)
 
-        return dir
+        return objects
 
     def tar_backup_content(self, filename, sources):
         self.filename = filename
@@ -248,22 +253,6 @@ def update_node_exporter(work_dir, collector_dir):
     )
 
 
-# remove the backup file and any intermediate files created
-def cleanup(backup, intermediate_files):
-
-    for item in intermediate_files:
-        logging.debug("Cleanup requested for {}".format(item))
-        if os.path.isfile(item):
-            os.remove(item)
-        elif os.path.isdir(item):
-            shutil.rmtree(item)
-        else:
-            logging.warn(
-                "Asked to cleanup {} but it's neither a file nor a directory".format(item))
-
-    backup.remove()
-
-
 def main():
 
     os.chdir(args.work_dir)
@@ -309,10 +298,9 @@ def main():
     # Files to be uploaded to S3
     content = []
     try:
-        snapshot = backup.backup_artifacts()
-        content += [snapshot, ]
+        content = backup.backup_artifacts()
         # we'll want to bin this once backup completes
-        intermediate_files.append(snapshot)
+        intermediate_files.append(content)
 
         if args.encrypt:
             # New list of files to encrypt
@@ -385,7 +373,7 @@ def main():
         logging.error(
             "Exception caught during backup: {} - {}".format(e, traceback.format_exc()))
     finally:
-        cleanup(backup, intermediate_files)
+        empty_contents(args.work_dir)
 
 
 if __name__ == "__main__":

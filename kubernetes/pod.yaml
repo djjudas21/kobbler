@@ -51,8 +51,3 @@ spec:
     - name: sshrsapubkey
       secret:
         secretName: cluster-ssh-key-pub
-  nodeSelector:
-    node-role.kubernetes.io/master: ""
-  tolerations:
-    - effect: NoSchedule
-      key: node-role.kubernetes.io/master

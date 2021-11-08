@@ -12,10 +12,16 @@ kind: ClusterRole
 metadata:
   name: secret-reader
 rules:
-#- apiGroups: ["rbac.authorization.k8s.io"]
 - apiGroups: [""]
   resources:
     - secrets
+  verbs:
+    - get
+    - watch
+    - list
+- apiGroups: ["infrastructure.ionos.com"]
+  resources:
+    - clusters
   verbs:
     - get
     - watch
@@ -26,7 +32,6 @@ kind: ClusterRoleBinding
 metadata:
   name: artifact-backup-secret-reader
 roleRef:
-  #apiGroup: rbac.authorization.k8s.io
   apiGroup: ""
   kind: ClusterRole
   name: secret-reader

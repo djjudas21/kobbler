@@ -113,6 +113,30 @@ def empty_contents(folder):
         except Exception as e:
             print('Failed to delete %s. Reason: %s' % (file_path, e))
 
+def export_to_yaml(item, dir):
+    try:
+        nsdir = os.path.join(dir, item.metadata.namespace, item.kind)
+    except:
+        return None
+
+    if not os.path.exists(nsdir):
+        os.mkdir(nsdir)
+
+    # Export the secret as a dict
+    dict = item.to_dict()
+
+    # Filter out unwanted attributes
+    newdict = kube_metadata_filter(dict)
+
+    # Write yaml version of this dict
+    filename = os.path.join(nsdir, item.metadata.name + '.yaml')
+    f = open(filename, "w")
+    f.write(yaml.dump(newdict))
+    f.close()
+    print(f"Exported {filename}")
+            
+    return filename
+
 # create a class that bases off S3Utils.S3Backup,
 class BackupArtifacts(S3Backup):
 
@@ -124,35 +148,41 @@ class BackupArtifacts(S3Backup):
     def backup_artifacts(self):
         # Load kube context from within cluster
         config.load_incluster_config()
-        v1 = client.CoreV1Api()
+        core = client.CoreV1Api()
+        custom = client.CustomObjectsApi()
 
         # Trash any existing files in backup dir
         dir  = args.work_dir
 
         logging.info("Backup artifacts, path={}".format(dir))
 
-        # Get secrets in all namespaces
-        secrets = v1.list_secret_for_all_namespaces(watch=False)
-        objects = []
-        for item in secrets.items:
-            nsdir = os.path.join(dir, item.metadata.namespace)
-            if not os.path.exists(nsdir):
-                os.mkdir(nsdir)
+        # Get labelled secrets and cluster CRs in all namespaces
+        label = "backup-operator.infrastructure.ionos.com/backup=true"
+        try:
+            secrets = core.list_secret_for_all_namespaces(watch=False, label_selector=label)
+        except:
+            secrets = None
+        try:
+            clusters = custom.list_cluster_custom_object(watch=False, group="infrastructure.ionos.com", version="v1", plural="clusters", label_selector=label)
+        except:
+            clusters = None
 
-            # Export the secret as a dict
-            dict = item.to_dict()
+        # Create empty list to contain exported yaml objects
+        exported_objects = []
 
-            # Filter out unwanted attributes
-            newdict = kube_metadata_filter(dict)
+        # Export all secrets and clusters to yaml objects
+        if secrets is not None:
+            for item in secrets.items:
+                filename = export_to_yaml(item, dir)
+                if filename is not None:
+                    exported_objects.append(filename)
+        if clusters is not None:
+            for item in clusters.items:
+                filename = export_to_yaml(item, dir)
+                if filename is not None:
+                    exported_objects.append(filename)
 
-            # Write yaml version of this dict
-            filename = os.path.join(nsdir, item.metadata.name + '.yaml')
-            f = open(filename, "w")
-            f.write(yaml.dump(newdict))
-            f.close()
-            objects.append(filename)
-
-        return objects
+        return exported_objects
 
     def tar_backup_content(self, filename, sources):
         self.filename = filename

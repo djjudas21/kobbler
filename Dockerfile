@@ -15,8 +15,6 @@ RUN apk add --no-cache --virtual .build-deps gcc musl-dev git rust cargo libffi-
     && pip install --no-cache-dir -r requirements.txt \
     && apk del .build-deps
 
-RUN apk add --no-cache -X http://dl-cdn.alpinelinux.org/alpine/edge/testing words-gb
-
 COPY artifact-backer-upper.py .
 
 ENTRYPOINT [ "python", "./artifact-backer-upper.py" ]

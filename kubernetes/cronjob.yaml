@@ -25,6 +25,8 @@ spec:
               env:
                 - name: BUCKET
                   value: artifact-backups
+                - name: BACKUP_NAME
+                  value: my-backups
                 - name: S3ENDPOINT
                   value: https://s3-de-central.profitbricks.com
                 - name: AWS_ACCESS_KEY_ID

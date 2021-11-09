@@ -1,21 +1,28 @@
 #!/usr/bin/env python
-import os
-import sys
-import logging
 import argparse
-import tarfile
-import socket
-import shutil
-import traceback
 import copy
+import logging
+import os
+import random
+import shutil
+import socket
+import sys
+import tarfile
+import traceback
 from datetime import datetime
 from logging import StreamHandler
-from S3Utils import S3Backup
-from Crypto.PublicKey import RSA
-from Crypto.Cipher import PKCS1_OAEP
-import secrets
+from os.path import basename
+from pathlib import Path
+
+import humanize
 import pyAesCrypt
 import yaml
+from Crypto.Cipher import PKCS1_OAEP
+from Crypto.PublicKey import RSA
+from S3Utils import S3Backup
+from english_words import english_words_alpha_set
+from kubernetes.client import ApiClient, V1Secret
+
 from kubernetes import client, config
 
 LOGGER = None
@@ -84,9 +91,16 @@ def kube_metadata_filter(resource):
     '''
 
     filtered = copy.deepcopy(resource)
-    metadata_remove = ['uid', 'owner_references',
-                       'managed_fields', 'resource_version']
-    annotations_remove = ['kopf.zalando.org/last-handled-configuration']
+    metadata_remove = [
+        'uid',
+        'ownerReferences',
+        'managedFields',
+        'resourceVersion'
+    ]
+    annotations_remove = [
+        'kopf.zalando.org/last-handled-configuration',
+        'kubectl.kubernetes.io/last-applied-configuration'
+    ]
 
     for md in metadata_remove:
         try:
@@ -113,48 +127,95 @@ def empty_contents(folder):
         except Exception as e:
             print('Failed to delete %s. Reason: %s' % (file_path, e))
 
-def export_to_yaml(item, dir):
-    try:
-        nsdir = os.path.join(dir, item.metadata.namespace, item.kind)
-    except:
-        return None
 
-    if not os.path.exists(nsdir):
-        os.mkdir(nsdir)
+def export_to_yaml(item, work_dir):
+    if isinstance(item, dict):
+        ns_dir = os.path.join(work_dir, item["metadata"]["namespace"], item["kind"])
+        resource_name = item["metadata"]["name"]
+    else:
+        ns_dir = os.path.join(work_dir, item.metadata.namespace, item.kind)
+        resource_name = item.metadata.name
 
-    # Export the secret as a dict
-    dict = item.to_dict()
+    os.makedirs(ns_dir, exist_ok=True)
+
+    # Let kube api serialise our model and sort key case
+    serialised_dict = ApiClient().sanitize_for_serialization(item)
 
     # Filter out unwanted attributes
-    newdict = kube_metadata_filter(dict)
+    filtered_dict = kube_metadata_filter(serialised_dict)
 
     # Write yaml version of this dict
-    filename = os.path.join(nsdir, item.metadata.name + '.yaml')
-    f = open(filename, "w")
-    f.write(yaml.dump(newdict))
-    f.close()
-    print(f"Exported {filename}")
-            
+    filename = os.path.join(ns_dir, f"{resource_name}.yaml")
+
+    with open(filename, "w") as yaml_file:
+        yaml.dump(filtered_dict, yaml_file, default_flow_style=False)
+
+    logger.debug(f"Exported {filename}")
+
     return filename
+
 
 # create a class that bases off S3Utils.S3Backup,
 class BackupArtifacts(S3Backup):
+    backup_name: str = 'backup'
 
     # instantiator, this must take at least the same args as S3Backup
-    def __init__(self, **kwargs):
-        # init the base class
-        S3Backup.__init__(self, **kwargs)
+    def __init__(self, backup_name: str, s3_endpoint, s3_bucket, bucket_lifecycle_days, ssl_verify=True):
+        self.backup_name = backup_name
+
+        super().__init__(s3_endpoint, s3_bucket, bucket_lifecycle_days, ssl_verify)
+
+    def put(self, local_file):
+        """
+            override put so we can create a folder per backup name
+
+            Put a local file to the S3 bucket.
+
+            Required Arguments:
+                local_file (string) - Path to a local file
+
+            Optional Arguments: NONE
+
+            Returns True if a file was uploaded, False otherwise
+
+        """
+        logger = logging.getLogger(__name__)
+        try:
+            logger.info(f"Uploading {local_file} to s3://{self.s3_bucket}")
+            self.client.upload_file(str(local_file), self.s3_bucket, f"{self.backup_name}/{basename(local_file)}")
+        except Exception as e:
+            logger.error(f"Uploading backup failed: {e}")
+            return False
+
+        return True
+
+    @staticmethod
+    def __get_kube_api_client(kubeconfig_path: str = None) -> ApiClient:
+        # Login using the given kubeconfig
+        if kubeconfig_path:
+            return config.new_client_from_config(kubeconfig_path)
+
+        # Login using devs local kubeconfig
+        user_kubeconfig = Path(os.path.expanduser("~")).joinpath(".kube", "config")
+        if user_kubeconfig.exists():
+            config.load_kube_config()
+            return config.new_client_from_config()
+
+        # Login using the in cluster kubeconfig
+        config.load_incluster_config()
+        return ApiClient()
 
     def backup_artifacts(self):
-        # Load kube context from within cluster
-        config.load_incluster_config()
-        core = client.CoreV1Api()
-        custom = client.CustomObjectsApi()
+        # Get kube api client for context
+        kube_api_client = self.__get_kube_api_client()
 
-        # Trash any existing files in backup dir
-        dir  = args.work_dir
+        core = client.CoreV1Api(api_client=kube_api_client)
+        custom = client.CustomObjectsApi(api_client=kube_api_client)
 
-        logging.info("Backup artifacts, path={}".format(dir))
+        # Trash any existing files in backup work_dir
+        work_dir = args.work_dir
+
+        logging.info("Backup artifacts, path={}".format(work_dir))
 
         # Get labelled secrets and cluster CRs in all namespaces
         label = "backup-operator.infrastructure.ionos.com/backup=true"
@@ -163,7 +224,7 @@ class BackupArtifacts(S3Backup):
         except:
             secrets = None
         try:
-            clusters = custom.list_cluster_custom_object(watch=False, group="infrastructure.ionos.com", version="v1", plural="clusters", label_selector=label)
+            clusters = custom.list_cluster_custom_object(group="infrastructure.ionos.com", version="v1", plural="clusters", label_selector=label)
         except:
             clusters = None
 
@@ -172,13 +233,23 @@ class BackupArtifacts(S3Backup):
 
         # Export all secrets and clusters to yaml objects
         if secrets is not None:
+            item: V1Secret
             for item in secrets.items:
-                filename = export_to_yaml(item, dir)
+                secret = core.read_namespaced_secret(item.metadata.name, item.metadata.namespace)
+                filename = export_to_yaml(secret, work_dir)
                 if filename is not None:
                     exported_objects.append(filename)
         if clusters is not None:
-            for item in clusters.items:
-                filename = export_to_yaml(item, dir)
+            cluster: dict
+            for cluster in clusters["items"]:
+                cluster_to_export = custom.get_namespaced_custom_object(
+                    group="infrastructure.ionos.com",
+                    version="v1",
+                    plural="clusters",
+                    name=cluster["metadata"]["name"],
+                    namespace=cluster["metadata"]["namespace"]
+                )
+                filename = export_to_yaml(cluster_to_export, work_dir)
                 if filename is not None:
                     exported_objects.append(filename)
 
@@ -215,9 +286,7 @@ def encrypt_blob(blob, public_key):
 
 
 def generate_otp():
-    with open('/usr/share/dict/british-english') as f:
-        words = [word.strip() for word in f]
-    return '-'.join(secrets.choice(words) for i in range(8))
+    return "-".join(random.sample(english_words_alpha_set, 8))
 
 
 def encrypt_file_rsa(public_key, filename):
@@ -285,10 +354,12 @@ def update_node_exporter(work_dir, collector_dir):
 
 def main():
 
-    os.chdir(args.work_dir)
-
     backup = BackupArtifacts(
-        s3_endpoint=args.s3_endpoint, s3_bucket=args.bucket, bucket_lifecycle_days=args.expire_days, ssl_verify=SSL_VERIFY
+        backup_name=args.backup_name,
+        s3_endpoint=args.s3_endpoint,
+        s3_bucket=args.bucket,
+        bucket_lifecycle_days=args.expire_days,
+        ssl_verify=SSL_VERIFY
     )
     backup.ensure_bucket_created()
     backup.ensure_bucket_lifecycle()
@@ -320,7 +391,6 @@ def main():
 
     # if we get here, we should be performing a backup
     backup_date_time = datetime.now().strftime("%d-%m-%Y-%H.%M.%S")
-    hostname = socket.gethostname()
 
     # Files to be deleted later
     intermediate_files = []
@@ -338,11 +408,10 @@ def main():
 
             # Generate a one-time passphrase and save it in a file
             otp = generate_otp()
-            otpfile = "{}/otp-{}.{}.txt".format(args.work_dir,
-                                                hostname, backup_date_time)
-            with open(otpfile, 'w') as f:
+            otp_file = f"{args.work_dir}/otp-{args.backup_name}.{backup_date_time}.txt"
+            with open(otp_file, 'w') as f:
                 f.write(otp)
-            intermediate_files.append(otpfile)
+            intermediate_files.append(otp_file)
 
             # Encrypt the large backup file with AES (fast)
             # loop through content, if it's a dir, glob it
@@ -350,15 +419,13 @@ def main():
             for c in content:
                 if os.path.isfile(c):
                     encrypt_content.append(c)
-                    logger.info(
-                        "Added {} to list of files to encrypt".format(c))
+                    logger.info(f"Added {c} to list of files to encrypt")
                 elif os.path.isdir(c):
                     files = os.listdir(c)
                     for f in files:
                         target = os.path.join(c, f)
                         encrypt_content.append(target)
-                        logger.info(
-                            "Added {} to list of files to encrypt".format(target))
+                        logger.info(f"Added {target} to list of files to encrypt")
 
             # List of files that have been encrypted
             encrypted_content = []
@@ -368,16 +435,15 @@ def main():
                 encrypted_content.append(encrypted_filename)
 
             # Now encrypt the OTP with RSA (slow)
-            encrypted_otpfile = encrypt_file_rsa(args.publickey, otpfile)
-            encrypted_content.append(encrypted_otpfile)
+            encrypted_otp_file = encrypt_file_rsa(args.publickey, otp_file)
+            encrypted_content.append(encrypted_otp_file)
 
             # Now we have a list of encrypted files to back up, make sure these are the
             # only files that get tarred up
             content = encrypted_content
 
         # tarball the backup content
-        backup_filename = "{}/{}.{}.tgz".format(
-            args.work_dir, hostname, backup_date_time)
+        backup_filename = f"{args.work_dir}/{args.backup_name}.{backup_date_time}.tgz"
         backup.tar_backup_content(backup_filename, content)
 
         # if we failed to backup, moan about it
@@ -386,8 +452,7 @@ def main():
             raise RuntimeError("Backup failed, check logs")
         else:
             logging.info("get backup size")
-            backup.backup_size()
-            logging.info("Backup {} was created".format(backup_filename))
+            logging.info(f"Backup {backup_filename} of size {humanize.naturalsize(backup.backup_size())} was created")
 
         # upload and test if that happened
         if backup.upload():
@@ -408,6 +473,9 @@ def main():
 
 if __name__ == "__main__":
 
+    # Initialise defaults
+    default_backup_name = os.getenv("BACKUP_NAME", default=os.getenv("HOSTNAME", "backup"))
+
     # parse out command line arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--loglevel", required=False, default="INFO",
@@ -422,6 +490,7 @@ if __name__ == "__main__":
                         help="The S3 endpoint (Default=https://s3.gb.iplatform.1and1.org)")
     parser.add_argument("--bucket", required=True,
                         help="The bucket name for backups to be uploaded to")
+    parser.add_argument("--backup-name", required=False, default=default_backup_name, help="The name for the backup")
     parser.add_argument("--expire-days", required=False, default=7, type=int,
                         help="The number of days before backups expire (Default=7)")
     parser.add_argument("--work-dir", required=False, default="/var/tmp",
@@ -432,8 +501,6 @@ if __name__ == "__main__":
                         help="Encrypt the backup file (Default=False)")
     parser.add_argument("--publickey", required=False, default="/etc/ssh/ssh_host_rsa_key.pub",
                         help="RSA public key to use for encrypting the backup")
-    parser.add_argument("--hostname", required=False,
-                        default=socket.gethostname())
 
     args = parser.parse_args()
 

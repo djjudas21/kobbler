@@ -473,34 +473,67 @@ def main():
 
 if __name__ == "__main__":
 
-    # Initialise defaults
-    default_backup_name = os.getenv("BACKUP_NAME", default=os.getenv("HOSTNAME", "backup"))
-
     # parse out command line arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument("--loglevel", required=False, default="INFO",
-                        help="Log level, one of INFO,WARN,DEBUG (Default=INFO)")
-    parser.add_argument("--list", required=False,
-                        help="List existing backups only", action='store_true')
-    parser.add_argument("--remove", required=False,
-                        help="Provide a comma separated list of backup files to remove")
-    parser.add_argument("--get", required=False,
-                        help="Get an object from the bucket")
-    parser.add_argument("--s3-endpoint", required=False, default="https://s3.gb.iplatform.1and1.org",
-                        help="The S3 endpoint (Default=https://s3.gb.iplatform.1and1.org)")
-    parser.add_argument("--bucket", required=True,
-                        help="The bucket name for backups to be uploaded to")
-    parser.add_argument("--backup-name", required=False, default=default_backup_name, help="The name for the backup")
-    parser.add_argument("--expire-days", required=False, default=7, type=int,
-                        help="The number of days before backups expire (Default=7)")
-    parser.add_argument("--work-dir", required=False, default="/var/tmp",
-                        help="Temporary working directory (Default=/var/tmp)")
-    parser.add_argument("--collector-dir", required=False, default="/opt/node_exporter",
-                        help="Node export collector directory (Default=/opt/node_exporter)")
-    parser.add_argument("--encrypt", required=False,
-                        help="Encrypt the backup file (Default=False)")
-    parser.add_argument("--publickey", required=False, default="/etc/ssh/ssh_host_rsa_key.pub",
-                        help="RSA public key to use for encrypting the backup")
+    parser.add_argument("--loglevel",
+                        required=False,
+                        default="INFO",
+                        help="Log level, one of INFO,WARN,DEBUG (Default=INFO)"
+    )
+    parser.add_argument("--list",
+                        required=False,
+                        help="List existing backups only",
+                        action='store_true'
+    )
+    parser.add_argument("--remove",
+                        required=False,
+                        help="Provide a comma separated list of backup files to remove"
+    )
+    parser.add_argument("--get",
+                        required=False,
+                        help="Get an object from the bucket"
+    )
+    parser.add_argument("--s3-endpoint",
+                        required=False,
+                        default=os.getenv("S3_ENDPOINT", "https://s3.gb.iplatform.1and1.org"),
+                        help="The S3 endpoint (Default=https://s3.gb.iplatform.1and1.org)"
+    )
+    parser.add_argument("--bucket",
+                        required=True,
+                        default = os.getenv("BUCKET_NAME"),
+                        help="The bucket name for backups to be uploaded to"
+    )
+    parser.add_argument("--backup-name",
+                        required=False,
+                        default=os.getenv("BACKUP_NAME", os.getenv("HOSTNAME", "backup")),
+                        help="The name for the backup"
+    )
+    parser.add_argument("--expire-days",
+                        required=False,
+                        default=7,
+                        type=int,
+                        help="The number of days before backups expire (Default=7)"
+    )
+    parser.add_argument("--work-dir",
+                        required=False,
+                        default="/var/tmp",
+                        help="Temporary working directory (Default=/var/tmp)"
+    )
+    parser.add_argument("--collector-dir",
+                        required=False,
+                        default=os.getenv("COLLECTOR_DIR", "/opt/node_exporter"),
+                        help="Node export collector directory (Default=/opt/node_exporter)"
+    )
+    parser.add_argument("--encrypt",
+                        required=False,
+                        default=os.getenv("ENCRYPT"),
+                        help="Encrypt the backup file (Default=False)"
+    )
+    parser.add_argument("--publickey",
+                        required=False,
+                        default=os.getenv("PUBLIC_KEY", "/etc/ssh/ssh_host_rsa_key.pub"),
+                        help="RSA public key to use for encrypting the backup"
+    )
 
     args = parser.parse_args()
 

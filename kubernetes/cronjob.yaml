@@ -20,7 +20,7 @@ spec:
           dnsPolicy: ClusterFirstWithHostNet
           containers:
             - name: artifact-backup
-              image: reg.1u1.it/okdaas/artifact-backup:0.1.0
+              image: reg.1u1.it/okdaas/artifact-backup:0.1.15
               imagePullPolicy: Always
               env:
                 - name: BUCKET

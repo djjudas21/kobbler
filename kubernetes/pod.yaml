@@ -11,13 +11,15 @@ spec:
   dnsPolicy: ClusterFirstWithHostNet
   containers:
     - name: artifact-backup
-      image: reg.1u1.it/okdaas/artifact-backup:0.1.14
+      image: reg.1u1.it/okdaas/artifact-backup:0.1.15
       imagePullPolicy: Always
       stdin: true 
       tty: true 
       env:
         - name: BUCKET
           value: artifact-backups
+        - name: BACKUP_NAME
+          value: my-backups
         - name: S3ENDPOINT
           value: https://s3-de-central.profitbricks.com
         - name: AWS_ACCESS_KEY_ID

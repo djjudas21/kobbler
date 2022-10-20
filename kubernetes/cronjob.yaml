@@ -1,68 +1,25 @@
-apiVersion: batch/v1beta1
+apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: artifact-backup
-  labels:
-    app: artifact
-    component: backup
+  name: kube-artifact-backup
 spec:
-  schedule: "40 */4 * * *"
-  concurrencyPolicy: Forbid
-  successfulJobsHistoryLimit: 5
-  failedJobsHistoryLimit: 1
+  schedule: "0 0 * * *"
   jobTemplate:
     spec:
-      backoffLimit: 0
       template:
         spec:
-          serviceAccountName: artifact-backup
-          restartPolicy: Never
-          dnsPolicy: ClusterFirstWithHostNet
           containers:
-            - name: artifact-backup
-              image: reg.1u1.it/okdaas/artifact-backup:0.2.0
-              imagePullPolicy: Always
-              env:
-                - name: BUCKET
-                  value: artifact-backups
-                - name: BACKUP_NAME
-                  value: my-backups
-                - name: S3ENDPOINT
-                  value: https://s3-de-central.profitbricks.com
-                - name: AWS_ACCESS_KEY_ID
-                  valueFrom:
-                    secretKeyRef:
-                      name: s3credentials
-                      key: aws_access_key_id
-                - name: AWS_SECRET_ACCESS_KEY
-                  valueFrom:
-                    secretKeyRef:
-                      name: s3credentials
-                      key: aws_secret_access_key
-                - name: HTTP_PROXY
-                  value: http://itproxy.1and1.org:3128
-                - name: HTTPS_PROXY
-                  value: http://itproxy.1and1.org:3128
-              command:
-                - python
-                - ./artifact-backer-upper.py
-                - --bucket=artifact-backups
-                - --s3-endpoint=https://s3-de-central.profitbricks.com
-                - --encrypt=True
-                - --collector-dir=/var/node_exporter/textfile
-                - --publickey=/etc/ssh/id_rsa.pub
+            - name: kube-artifact-backup
+              image: docker.io/1and1internet/kube-artifact-backup
+              imagePullPolicy: IfNotPresent
+              envFrom:
+                - secretRef:
+                    name: s3_credentials
+                - configMapRef:
+                    name: backup-config
               volumeMounts:
-                - name: sshrsapubkey
-                  mountPath: "/etc/ssh/"
-                  readOnly: true
-              resources:
-                requests:
-                  memory: "128Mi"
-                  cpu: "500m"
-                limits:
-                  memory: "512Mi"
-                  cpu: "4000m"
+                - name: certs
+                  mountPath: /certs
           volumes:
-            - name: sshrsapubkey
-              secret:
-                secretName: cluster-ssh-key-pub
+            - name: certs
+          restartPolicy: OnFailure

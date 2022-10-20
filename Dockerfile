@@ -6,12 +6,17 @@ COPY requirements.txt .
 
 ENV GIT_SSL_NO_VERIFY=true
 
-RUN apk add --no-cache coreutils
+ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
-RUN apk add --no-cache --virtual .build-deps gcc musl-dev git rust cargo libffi-dev openssl-dev \
+RUN apk add --no-cache coreutils curl gnupg ca-certificates
+
+RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
+    && install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+
+RUN apk add --no-cache --virtual .build-deps gcc musl-dev linux-headers \
     && pip install --no-cache-dir -r requirements.txt \
     && apk del .build-deps
 
-COPY artifact-backer-upper.py .
+COPY artifact-backup.py .
 
-ENTRYPOINT [ "python", "./artifact-backer-upper.py" ]
+ENTRYPOINT [ "python", "-u", "./artifact-backup.py" ]
